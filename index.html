@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Meal Planner</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#C98A2E">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Meal Planner">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -88,7 +96,8 @@
   .extra-remove { background: none; border: none; color: var(--ink-soft); font-size: 1rem; cursor: pointer; padding: 2px 6px; flex-shrink: 0; }
   .extra-toggle { font-size: 0.72rem; margin-top: 6px; }
   .extra-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .extra-form input { font-family: inherit; font-size: 0.8rem; padding: 6px; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); flex: 1; min-width: 90px; }
+  .extra-form input, .extra-form select { font-family: inherit; font-size: 0.8rem; padding: 6px; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); flex: 1; min-width: 90px; }
+  .extra-form select { flex-basis: 100%; }
 
   .slot-row { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-bottom: 1px solid color-mix(in srgb, var(--rule) 25%, transparent); }
   .slot-row:last-of-type { border-bottom: none; }
@@ -492,6 +501,9 @@
         '<div class="extras-block">' + extrasHtml +
         '<button type="button" class="btn-ghost extra-toggle" data-day="' + d + '">+ Log extra food</button>' +
         '<div class="extra-form hidden" data-day="' + d + '">' +
+        '<select class="extra-meal-pick"><option value="">Pick a saved meal… (or type below)</option>' +
+        meals.map(function (m) { return '<option value="' + m.id + '">' + esc(m.name) + '</option>'; }).join("") +
+        '</select>' +
         '<input type="text" class="extra-desc" placeholder="What did you eat?">' +
         '<input type="number" class="extra-kcal" placeholder="kcal" min="0">' +
         '<input type="number" class="extra-protein" placeholder="protein g" min="0">' +
@@ -517,6 +529,17 @@
       btn.addEventListener("click", function () {
         var day = btn.getAttribute("data-day");
         btn.parentElement.querySelector('.extra-form[data-day="' + day + '"]').classList.toggle("hidden");
+      });
+    });
+    mount.querySelectorAll(".extra-meal-pick").forEach(function (sel) {
+      sel.addEventListener("change", function () {
+        var m = findMeal(sel.value);
+        var form = sel.closest(".extra-form");
+        if (!m) return;
+        form.querySelector(".extra-desc").value = m.name;
+        form.querySelector(".extra-kcal").value = m.kcal;
+        form.querySelector(".extra-protein").value = m.protein;
+        sel.value = "";
       });
     });
     mount.querySelectorAll(".extra-add").forEach(function (btn) {
@@ -568,6 +591,8 @@
     mount.querySelectorAll(".mc-delete").forEach(function (b) {
       b.addEventListener("click", function () {
         var id = b.getAttribute("data-id");
+        var m = findMeal(id);
+        if (!confirm('Delete "' + (m ? m.name : "this meal") + '"? This can\'t be undone.')) return;
         mealsCol.doc(id).delete();
         var upd = {}; Object.keys(plan).forEach(function (k) { if (plan[k] === id) upd["plan." + k] = ""; });
         if (Object.keys(upd).length) stateRef.update(upd);
@@ -845,6 +870,10 @@
       document.getElementById("panel-" + btn.getAttribute("data-tab")).classList.add("active");
     });
   });
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+  }
 })();
 </script>
 </body>
