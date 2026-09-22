@@ -152,14 +152,22 @@
     <div class="who">
       <img id="userPhoto" src="" alt="">
       <span id="userName"></span>
+      <button class="btn-ghost" id="editGoalsBtn">Edit goals</button>
       <button class="btn-ghost" id="signoutBtn">Sign out</button>
     </div>
   </header>
   <div class="stat-row">
-    <div class="stat"><span class="stat-num">~2,100</span><span class="stat-label">kcal / day</span></div>
-    <div class="stat"><span class="stat-num">150g+</span><span class="stat-label">protein / day</span></div>
+    <div class="stat"><span class="stat-num" id="statKcal"></span><span class="stat-label">kcal / day</span></div>
+    <div class="stat"><span class="stat-num" id="statProtein"></span><span class="stat-label">protein / day</span></div>
     <div class="stat"><span class="stat-num">7</span><span class="stat-label">days planned</span></div>
-    <div class="stat"><span class="stat-num">-0.5kg</span><span class="stat-label">target / week</span></div>
+    <div class="stat"><span class="stat-num" id="statWeekly"></span><span class="stat-label">target / week</span></div>
+  </div>
+  <div class="weigh-form hidden" id="goalsForm">
+    <label>Calories / day <input type="number" id="gKcal" min="0" step="10"></label>
+    <label>Protein / day (g) <input type="number" id="gProtein" min="0" step="1"></label>
+    <label>Weekly target (kg, negative to lose) <input type="number" id="gWeekly" step="0.1"></label>
+    <button class="btn-primary" id="goalsSaveBtn">Save goals</button>
+    <button class="btn-ghost" id="goalsCancelBtn">Cancel</button>
   </div>
 
   <nav class="tabs" role="tablist">
@@ -307,7 +315,9 @@
     "7-b":"m1","7-l":"m3","7-s":"m7","7-d":"m5","7-e":"m9"
   };
 
-  var meals = [], plan = {}, eaten = {}, shopChk5 = {}, shopChk7 = {}, weighins = [];
+  var DEFAULT_GOALS = { kcal: 2100, protein: 150, weeklyTarget: -0.5 };
+
+  var meals = [], plan = {}, eaten = {}, shopChk5 = {}, shopChk7 = {}, weighins = [], goals = DEFAULT_GOALS;
   var uid = null, stateRef = null, mealsCol = null;
   var unsubs = [];
 
@@ -338,7 +348,7 @@
       if (!snap.empty) return;
       var batch = fdb.batch();
       DEFAULT_MEALS.forEach(function (m) { batch.set(mealsCol.doc(m.id), m); });
-      batch.set(stateRef, { plan: DEFAULT_PLAN, eaten: {}, shopChk5: {}, shopChk7: {}, weighins: [] });
+      batch.set(stateRef, { plan: DEFAULT_PLAN, eaten: {}, shopChk5: {}, shopChk7: {}, weighins: [], goals: DEFAULT_GOALS });
       return batch.commit();
     });
   }
@@ -353,9 +363,39 @@
       plan = data.plan || {}; eaten = data.eaten || {};
       shopChk5 = data.shopChk5 || {}; shopChk7 = data.shopChk7 || {};
       weighins = data.weighins || [];
+      goals = data.goals || DEFAULT_GOALS;
+      renderStats();
       renderDays(); renderShop("5"); renderShop("7"); renderProgress();
     }));
   }
+
+  /* ================= GOALS ================= */
+  function renderStats() {
+    document.getElementById("statKcal").textContent = "~" + goals.kcal.toLocaleString();
+    document.getElementById("statProtein").textContent = goals.protein + "g+";
+    document.getElementById("statWeekly").textContent = (goals.weeklyTarget > 0 ? "+" : "") + goals.weeklyTarget + "kg";
+  }
+  document.getElementById("editGoalsBtn").addEventListener("click", function () {
+    document.getElementById("gKcal").value = goals.kcal;
+    document.getElementById("gProtein").value = goals.protein;
+    document.getElementById("gWeekly").value = goals.weeklyTarget;
+    document.getElementById("goalsForm").classList.remove("hidden");
+  });
+  document.getElementById("goalsCancelBtn").addEventListener("click", function () {
+    document.getElementById("goalsForm").classList.add("hidden");
+  });
+  document.getElementById("goalsSaveBtn").addEventListener("click", function () {
+    var kcal = parseInt(document.getElementById("gKcal").value, 10);
+    var protein = parseInt(document.getElementById("gProtein").value, 10);
+    var weeklyTarget = parseFloat(document.getElementById("gWeekly").value);
+    var newGoals = {
+      kcal: isNaN(kcal) ? goals.kcal : kcal,
+      protein: isNaN(protein) ? goals.protein : protein,
+      weeklyTarget: isNaN(weeklyTarget) ? goals.weeklyTarget : weeklyTarget
+    };
+    stateRef.update({ goals: newGoals });
+    document.getElementById("goalsForm").classList.add("hidden");
+  });
 
   /* ================= MEAL PLAN TAB ================= */
   function renderDays() {
@@ -599,8 +639,9 @@
       var days = (new Date(last.date) - new Date(first.date)) / 86400000;
       var weeks = Math.max(days / 7, 1 / 7);
       var perWeek = (last.weight - first.weight) / weeks;
+      var targetAbs = Math.abs(goals.weeklyTarget).toFixed(2);
       el.innerHTML = '<div class="progress-summary">' + (perWeek <= 0
-        ? "Averaging <b>" + Math.abs(perWeek).toFixed(2) + "kg/week</b> loss over " + weeks.toFixed(1) + " weeks (target: 0.5kg/week)."
+        ? "Averaging <b>" + Math.abs(perWeek).toFixed(2) + "kg/week</b> loss over " + weeks.toFixed(1) + " weeks (target: " + targetAbs + "kg/week)."
         : "Averaging <b>+" + perWeek.toFixed(2) + "kg/week</b> over " + weeks.toFixed(1) + " weeks &mdash; above target.") + '</div>';
     }
     renderChart(sorted);
