@@ -188,7 +188,7 @@
     <section class="panel" id="panel-meals">
       <h2 class="section-title">Meals Database</h2>
       <p class="shop-note">Your own recipes &mdash; not visible to anyone else.</p>
-      <div class="btn-row"><button class="btn-primary" id="newMealBtn">+ New meal</button></div>
+      <div class="btn-row"><button class="btn-primary" id="newMealBtn">+ New meal</button><button class="btn-ghost" id="resetMealsBtn">Restore starter meals</button></div>
       <div class="meal-form" id="mealForm">
         <h3 id="mealFormTitle">New meal</h3>
         <div class="ff-row">
@@ -240,13 +240,21 @@
 
     <section class="panel" id="panel-cook">
       <h2 class="section-title">Batch Prep &mdash; Do This Once</h2>
-      <ol class="cook-steps">
-        <li><b>Chicken breast:</b> pan-sear or bake the whole batch, seasoned plain (salt, pepper, garlic powder) so it works under any sauce later.</li>
-        <li><b>Beef mince:</b> brown with taco seasoning, keep it separate from the chicken.</li>
-        <li><b>Potatoes:</b> chop, toss with olive oil and salt, air-fry ~20 min at 200&deg;C, in batches.</li>
-        <li><b>Frozen veg:</b> no batching needed &mdash; steam or microwave a fresh portion each meal.</li>
-      </ol>
-      <div class="cook-note">Repeat the batch midweek if cooking for a full 7 days. For a specific meal's exact steps, tap it open in the Meal Plan tab or check its entry in Meals DB.</div>
+      <p class="shop-note">Your own guide &mdash; edit it to match how you actually cook.</p>
+      <div class="btn-row"><button class="btn-ghost" id="editCookBtn">Edit guide</button><button class="btn-ghost" id="resetCookBtn">Restore starter guide</button></div>
+      <div class="meal-form" id="cookForm">
+        <h3>Edit batch prep guide</h3>
+        <div class="ing-label">Steps (one per line, "Label: details")</div>
+        <textarea id="cf-steps" style="min-height:120px;"></textarea>
+        <div class="ing-label">Note</div>
+        <textarea id="cf-note"></textarea>
+        <div class="form-actions">
+          <button class="btn-primary" id="saveCookBtn">Save guide</button>
+          <button class="btn-ghost" id="cancelCookBtn">Cancel</button>
+        </div>
+      </div>
+      <ol class="cook-steps" id="cook-steps-mount"></ol>
+      <div class="cook-note" id="cook-note-mount"></div>
     </section>
   </main>
 </div>
@@ -317,7 +325,17 @@
 
   var DEFAULT_GOALS = { kcal: 2100, protein: 150, weeklyTarget: -0.5 };
 
-  var meals = [], plan = {}, eaten = {}, shopChk5 = {}, shopChk7 = {}, weighins = [], goals = DEFAULT_GOALS;
+  var DEFAULT_COOK = {
+    steps: [
+      "Chicken breast: pan-sear or bake the whole batch, seasoned plain (salt, pepper, garlic powder) so it works under any sauce later.",
+      "Beef mince: brown with taco seasoning, keep it separate from the chicken.",
+      "Potatoes: chop, toss with olive oil and salt, air-fry ~20 min at 200°C, in batches.",
+      "Frozen veg: no batching needed — steam or microwave a fresh portion each meal."
+    ],
+    note: "Repeat the batch midweek if cooking for a full 7 days. For a specific meal's exact steps, tap it open in the Meal Plan tab or check its entry in Meals DB."
+  };
+
+  var meals = [], plan = {}, eaten = {}, shopChk5 = {}, shopChk7 = {}, weighins = [], goals = DEFAULT_GOALS, cookGuide = DEFAULT_COOK;
   var uid = null, stateRef = null, mealsCol = null;
   var unsubs = [];
 
@@ -344,11 +362,11 @@
   });
 
   function seedIfEmpty() {
-    return mealsCol.limit(1).get().then(function (snap) {
-      if (!snap.empty) return;
+    return stateRef.get().then(function (doc) {
+      if (doc.exists) return;
       var batch = fdb.batch();
       DEFAULT_MEALS.forEach(function (m) { batch.set(mealsCol.doc(m.id), m); });
-      batch.set(stateRef, { plan: DEFAULT_PLAN, eaten: {}, shopChk5: {}, shopChk7: {}, weighins: [], goals: DEFAULT_GOALS });
+      batch.set(stateRef, { plan: DEFAULT_PLAN, eaten: {}, shopChk5: {}, shopChk7: {}, weighins: [], goals: DEFAULT_GOALS, cookGuide: DEFAULT_COOK });
       return batch.commit();
     });
   }
@@ -364,8 +382,9 @@
       shopChk5 = data.shopChk5 || {}; shopChk7 = data.shopChk7 || {};
       weighins = data.weighins || [];
       goals = data.goals || DEFAULT_GOALS;
+      cookGuide = data.cookGuide || DEFAULT_COOK;
       renderStats();
-      renderDays(); renderShop("5"); renderShop("7"); renderProgress();
+      renderDays(); renderShop("5"); renderShop("7"); renderProgress(); renderCookGuide();
     }));
   }
 
@@ -495,6 +514,12 @@
   function wireIngRemove(scope) { scope.querySelectorAll(".ing-remove").forEach(function (btn) { btn.onclick = function () { btn.closest(".ing-row").remove(); }; }); }
   document.getElementById("cancelMealBtn").addEventListener("click", function () { document.getElementById("mealForm").classList.remove("open"); editingId = null; });
   document.getElementById("newMealBtn").addEventListener("click", function () { openForm(null); });
+  document.getElementById("resetMealsBtn").addEventListener("click", function () {
+    if (!confirm("Restore the starter meals? This adds back any of the original recipes you've deleted or edited, without touching meals you've added yourself.")) return;
+    var batch = fdb.batch();
+    DEFAULT_MEALS.forEach(function (m) { batch.set(mealsCol.doc(m.id), m); });
+    batch.commit();
+  });
   document.getElementById("addIngRow").addEventListener("click", function () {
     var mount = document.getElementById("ing-rows");
     mount.insertAdjacentHTML("beforeend", ingredientRowHtml());
@@ -677,6 +702,34 @@
     list.push({ date: date, weight: weight });
     stateRef.update({ weighins: list });
     document.getElementById("wWeight").value = "";
+  });
+
+  /* ================= COOKING GUIDE ================= */
+  function renderCookGuide() {
+    var stepsMount = document.getElementById("cook-steps-mount");
+    stepsMount.innerHTML = cookGuide.steps.map(function (s) {
+      var i = s.indexOf(":");
+      if (i === -1) return "<li>" + esc(s) + "</li>";
+      return "<li><b>" + esc(s.slice(0, i)) + ":</b>" + esc(s.slice(i + 1)) + "</li>";
+    }).join("");
+    document.getElementById("cook-note-mount").textContent = cookGuide.note || "";
+  }
+  document.getElementById("editCookBtn").addEventListener("click", function () {
+    document.getElementById("cf-steps").value = cookGuide.steps.join("\n");
+    document.getElementById("cf-note").value = cookGuide.note || "";
+    document.getElementById("cookForm").classList.add("open");
+    document.getElementById("cookForm").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  document.getElementById("cancelCookBtn").addEventListener("click", function () { document.getElementById("cookForm").classList.remove("open"); });
+  document.getElementById("saveCookBtn").addEventListener("click", function () {
+    var steps = document.getElementById("cf-steps").value.split("\n").map(function (s) { return s.trim(); }).filter(Boolean);
+    var note = document.getElementById("cf-note").value.trim();
+    stateRef.update({ cookGuide: { steps: steps, note: note } });
+    document.getElementById("cookForm").classList.remove("open");
+  });
+  document.getElementById("resetCookBtn").addEventListener("click", function () {
+    if (!confirm("Restore the starter batch-prep guide? This replaces your current guide text.")) return;
+    stateRef.update({ cookGuide: DEFAULT_COOK });
   });
 
   document.querySelectorAll(".tabbtn").forEach(function (btn) {
