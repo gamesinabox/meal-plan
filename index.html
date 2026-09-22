@@ -72,6 +72,24 @@
   .eaten-bar { height: 6px; background: color-mix(in srgb, var(--rule) 14%, transparent); overflow: hidden; }
   .eaten-bar > span { display: block; height: 100%; background: var(--tick); }
 
+  .goal-track { padding: 8px 16px; border-bottom: 1px solid var(--rule); }
+  .goal-line { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--ink-soft); margin-bottom: 4px; }
+  .goal-bar { height: 6px; background: color-mix(in srgb, var(--rule) 14%, transparent); overflow: hidden; margin-bottom: 8px; }
+  .goal-bar:last-child { margin-bottom: 0; }
+  .goal-bar > span { display: block; height: 100%; }
+  .goal-bar.kcal > span { background: var(--mustard); }
+  .goal-bar.protein > span { background: var(--tick); }
+  .goal-bar.over > span { background: var(--rust); }
+
+  .extras-block { padding: 10px 16px 14px; }
+  .extras-label { font-size: 0.68rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; display: block; margin-bottom: 6px; }
+  .extra-item { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; padding: 4px 0; border-bottom: 1px solid color-mix(in srgb, var(--rule) 15%, transparent); }
+  .extra-item span.extra-macros { color: var(--ink-soft); font-size: 0.76rem; }
+  .extra-remove { background: none; border: none; color: var(--ink-soft); font-size: 1rem; cursor: pointer; padding: 2px 6px; flex-shrink: 0; }
+  .extra-toggle { font-size: 0.72rem; margin-top: 6px; }
+  .extra-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .extra-form input { font-family: inherit; font-size: 0.8rem; padding: 6px; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); flex: 1; min-width: 90px; }
+
   .slot-row { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-bottom: 1px solid color-mix(in srgb, var(--rule) 25%, transparent); }
   .slot-row:last-of-type { border-bottom: none; }
   .slot-check { width: 18px; height: 18px; accent-color: var(--tick); flex-shrink: 0; }
@@ -91,7 +109,7 @@
   .mc-macros { font-size: 0.8rem; color: var(--rust); margin: 4px 0 6px; font-family: 'Oswald', sans-serif; }
   .mc-ingredients { margin: 0 0 8px; padding-left: 18px; font-size: 0.85rem; color: var(--ink-soft); }
   .mc-prep { font-size: 0.85rem; margin: 0 0 8px; }
-  .mc-actions { display: flex; gap: 8px; }
+  .mc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .mc-actions button { font-size: 0.76rem; }
 
   .meal-form { background: var(--card); border: 2px solid var(--rule); padding: 14px; margin-bottom: 18px; display: none; }
@@ -182,6 +200,7 @@
   <main>
     <section class="panel active" id="panel-meal">
       <p class="shop-note">Your own plan &mdash; synced across your devices, private to your account.</p>
+      <div class="btn-row"><button class="btn-ghost" id="newWeekBtn">Start new week</button></div>
       <div id="days-mount"></div>
     </section>
 
@@ -189,6 +208,7 @@
       <h2 class="section-title">Meals Database</h2>
       <p class="shop-note">Your own recipes &mdash; not visible to anyone else.</p>
       <div class="btn-row"><button class="btn-primary" id="newMealBtn">+ New meal</button><button class="btn-ghost" id="resetMealsBtn">Restore starter meals</button></div>
+      <div class="btn-row"><input type="text" id="mealSearch" placeholder="Search meals by name…" style="flex:1;min-width:180px;font-family:inherit;font-size:0.85rem;padding:8px 10px;border:1px solid var(--rule);background:var(--card);color:var(--ink);"></div>
       <div class="meal-form" id="mealForm">
         <h3 id="mealFormTitle">New meal</h3>
         <div class="ff-row">
@@ -335,7 +355,8 @@
     note: "Repeat the batch midweek if cooking for a full 7 days. For a specific meal's exact steps, tap it open in the Meal Plan tab or check its entry in Meals DB."
   };
 
-  var meals = [], plan = {}, eaten = {}, shopChk5 = {}, shopChk7 = {}, weighins = [], goals = DEFAULT_GOALS, cookGuide = DEFAULT_COOK;
+  var meals = [], plan = {}, eaten = {}, shopChk5 = {}, shopChk7 = {}, weighins = [], goals = DEFAULT_GOALS, cookGuide = DEFAULT_COOK, extras = {};
+  var mealSearchTerm = "";
   var uid = null, stateRef = null, mealsCol = null;
   var unsubs = [];
 
@@ -366,7 +387,7 @@
       if (doc.exists) return;
       var batch = fdb.batch();
       DEFAULT_MEALS.forEach(function (m) { batch.set(mealsCol.doc(m.id), m); });
-      batch.set(stateRef, { plan: DEFAULT_PLAN, eaten: {}, shopChk5: {}, shopChk7: {}, weighins: [], goals: DEFAULT_GOALS, cookGuide: DEFAULT_COOK });
+      batch.set(stateRef, { plan: DEFAULT_PLAN, eaten: {}, shopChk5: {}, shopChk7: {}, weighins: [], goals: DEFAULT_GOALS, cookGuide: DEFAULT_COOK, extras: {} });
       return batch.commit();
     });
   }
@@ -383,6 +404,7 @@
       weighins = data.weighins || [];
       goals = data.goals || DEFAULT_GOALS;
       cookGuide = data.cookGuide || DEFAULT_COOK;
+      extras = data.extras || {};
       renderStats();
       renderDays(); renderShop("5"); renderShop("7"); renderProgress(); renderCookGuide();
     }));
@@ -417,6 +439,20 @@
   });
 
   /* ================= MEAL PLAN TAB ================= */
+  document.getElementById("newWeekBtn").addEventListener("click", function () {
+    if (!confirm("Start a new week? This clears all 'eaten' checkmarks and logged extra food for every day. Your meal plan, meals, goals and weigh-ins stay the same.")) return;
+    stateRef.update({ eaten: {}, extras: {} });
+  });
+
+  function goalBarHtml(cls, label, have, goal) {
+    var pct = goal ? Math.min(100, Math.round((have / goal) * 100)) : 0;
+    var over = goal && have > goal;
+    var remain = goal - have;
+    var remainText = goal ? (remain >= 0 ? Math.round(remain) + " left" : Math.round(-remain) + " over") : "";
+    return '<div class="goal-line"><span>' + label + '</span><span>' + Math.round(have) + ' / ' + Math.round(goal) + ' ' + remainText + '</span></div>' +
+      '<div class="goal-bar ' + cls + (over ? " over" : "") + '"><span style="width:' + pct + '%"></span></div>';
+  }
+
   function renderDays() {
     var mount = document.getElementById("days-mount");
     var html = "";
@@ -438,10 +474,28 @@
           '<button class="slot-info" data-target="det-' + pkey + '" title="How to make it">\u24d8</button></div>' +
           '<div class="slot-detail" id="det-' + pkey + '">' + (meal ? esc(meal.prep) : "Pick a meal to see how to make it.") + '</div>';
       });
+      var dayExtras = extras[d] || [];
+      var extrasKcal = 0, extrasP = 0;
+      dayExtras.forEach(function (x) { extrasKcal += x.kcal || 0; extrasP += x.protein || 0; });
+      eatenKcal += extrasKcal; eatenP += extrasP;
       var pct = totalKcal ? Math.min(100, Math.round((eatenKcal / totalKcal) * 100)) : 0;
+      var extrasHtml = dayExtras.length
+        ? '<span class="extras-label">Extra food logged</span>' + dayExtras.map(function (x) {
+            return '<div class="extra-item"><span>' + esc(x.desc) + ' <span class="extra-macros">(' + (x.kcal||0) + ' kcal &middot; ' + (x.protein||0) + 'g)</span></span><button class="extra-remove" data-day="' + d + '" data-id="' + x.id + '" title="Remove">\u00d7</button></div>';
+          }).join("")
+        : "";
       html += '<div class="day-card"><div class="day-head"><span class="num">Day ' + d + '</span><span class="day-total">Planned \u2248 ' + totalKcal + ' kcal &middot; ' + totalP + 'g protein</span></div>' +
         '<div class="eaten-track"><div class="eaten-line"><span>Eaten so far</span><span>' + eatenKcal + ' kcal &middot; ' + eatenP + 'g protein</span></div>' +
-        '<div class="eaten-bar"><span style="width:' + pct + '%"></span></div></div>' + rows + '</div>';
+        '<div class="eaten-bar"><span style="width:' + pct + '%"></span></div></div>' +
+        '<div class="goal-track">' + goalBarHtml("kcal", "Calories vs. daily goal", eatenKcal, goals.kcal) + goalBarHtml("protein", "Protein vs. daily goal", eatenP, goals.protein) + '</div>' +
+        rows +
+        '<div class="extras-block">' + extrasHtml +
+        '<button type="button" class="btn-ghost extra-toggle" data-day="' + d + '">+ Log extra food</button>' +
+        '<div class="extra-form hidden" data-day="' + d + '">' +
+        '<input type="text" class="extra-desc" placeholder="What did you eat?">' +
+        '<input type="number" class="extra-kcal" placeholder="kcal" min="0">' +
+        '<input type="number" class="extra-protein" placeholder="protein g" min="0">' +
+        '<button type="button" class="btn-primary extra-add" data-day="' + d + '">Add</button></div></div></div>';
     }
     mount.innerHTML = html;
     mount.querySelectorAll(".slot-select").forEach(function (sel) {
@@ -459,20 +513,58 @@
     mount.querySelectorAll(".slot-info").forEach(function (btn) {
       btn.addEventListener("click", function () { document.getElementById(btn.getAttribute("data-target")).classList.toggle("open"); });
     });
+    mount.querySelectorAll(".extra-toggle").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var day = btn.getAttribute("data-day");
+        btn.parentElement.querySelector('.extra-form[data-day="' + day + '"]').classList.toggle("hidden");
+      });
+    });
+    mount.querySelectorAll(".extra-add").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var day = btn.getAttribute("data-day");
+        var form = btn.closest(".extra-form");
+        var desc = form.querySelector(".extra-desc").value.trim();
+        var kcal = parseInt(form.querySelector(".extra-kcal").value, 10) || 0;
+        var protein = parseInt(form.querySelector(".extra-protein").value, 10) || 0;
+        if (!desc && !kcal && !protein) return;
+        var list = (extras[day] || []).slice();
+        list.push({ id: "x" + Date.now(), desc: desc || "Extra", kcal: kcal, protein: protein });
+        var upd = {}; upd["extras." + day] = list;
+        stateRef.update(upd);
+      });
+    });
+    mount.querySelectorAll(".extra-remove").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var day = btn.getAttribute("data-day"), id = btn.getAttribute("data-id");
+        var list = (extras[day] || []).filter(function (x) { return x.id !== id; });
+        var upd = {}; upd["extras." + day] = list;
+        stateRef.update(upd);
+      });
+    });
   }
 
   /* ================= MEALS DATABASE TAB ================= */
   var editingId = null;
+  document.getElementById("mealSearch").addEventListener("input", function (e) {
+    mealSearchTerm = e.target.value.trim().toLowerCase();
+    renderMeals();
+  });
   function renderMeals() {
     var mount = document.getElementById("meals-mount");
-    mount.innerHTML = meals.map(function (m) {
+    var filtered = mealSearchTerm ? meals.filter(function (m) { return m.name.toLowerCase().indexOf(mealSearchTerm) !== -1; }) : meals;
+    if (!filtered.length) {
+      mount.innerHTML = '<p class="empty-note">' + (meals.length ? "No meals match your search." : "No meals yet — add one above.") + '</p>';
+      return;
+    }
+    mount.innerHTML = filtered.map(function (m) {
       return '<div class="meal-card"><div class="mc-head"><span class="mc-name">' + esc(m.name) + '</span><span class="mc-tag">' + esc(m.slot) + '</span></div>' +
         '<div class="mc-macros">' + m.kcal + ' kcal &middot; ' + m.protein + 'g protein</div>' +
         '<ul class="mc-ingredients">' + m.ingredients.map(function (i) { return "<li>" + esc(ingLine(i)) + "</li>"; }).join("") + '</ul>' +
         (m.prep ? '<p class="mc-prep">' + esc(m.prep) + '</p>' : "") +
-        '<div class="mc-actions"><button class="btn-ghost mc-edit" data-id="' + m.id + '">Edit</button><button class="btn-ghost mc-delete" data-id="' + m.id + '">Delete</button></div></div>';
+        '<div class="mc-actions"><button class="btn-ghost mc-edit" data-id="' + m.id + '">Edit</button><button class="btn-ghost mc-dup" data-id="' + m.id + '">Duplicate</button><button class="btn-ghost mc-delete" data-id="' + m.id + '">Delete</button></div></div>';
     }).join("");
     mount.querySelectorAll(".mc-edit").forEach(function (b) { b.addEventListener("click", function () { openForm(b.getAttribute("data-id")); }); });
+    mount.querySelectorAll(".mc-dup").forEach(function (b) { b.addEventListener("click", function () { duplicateMeal(b.getAttribute("data-id")); }); });
     mount.querySelectorAll(".mc-delete").forEach(function (b) {
       b.addEventListener("click", function () {
         var id = b.getAttribute("data-id");
@@ -507,6 +599,19 @@
       document.getElementById("mf-kcal").value = ""; document.getElementById("mf-protein").value = ""; document.getElementById("mf-prep").value = "";
       rowsMount.innerHTML = ingredientRowHtml();
     }
+    wireIngRemove(rowsMount);
+    document.getElementById("mealForm").classList.add("open");
+    document.getElementById("mealForm").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function duplicateMeal(id) {
+    var m = findMeal(id); if (!m) return;
+    editingId = null;
+    var rowsMount = document.getElementById("ing-rows");
+    document.getElementById("mealFormTitle").textContent = "New meal";
+    document.getElementById("mf-name").value = m.name + " (copy)"; document.getElementById("mf-slot").value = m.slot;
+    document.getElementById("mf-kcal").value = m.kcal; document.getElementById("mf-protein").value = m.protein;
+    document.getElementById("mf-prep").value = m.prep || "";
+    rowsMount.innerHTML = m.ingredients.map(ingredientRowHtml).join("") || ingredientRowHtml();
     wireIngRemove(rowsMount);
     document.getElementById("mealForm").classList.add("open");
     document.getElementById("mealForm").scrollIntoView({ behavior: "smooth", block: "start" });
